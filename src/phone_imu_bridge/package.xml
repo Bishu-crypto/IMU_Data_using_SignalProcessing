@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>phone_imu_bridge</name>
+  <version>1.0.0</version>
+  <description>
+    Phone-based Inertial Navigation Unit (INU) for a DSP course project.
+    Streams IMU data from a phone accelerometer/gyroscope via HTTP,
+    applies Madgwick sensor fusion, Butterworth IIR filtering, and
+    trapezoidal numerical integration to estimate orientation, velocity,
+    and displacement in real-time. Includes a web dashboard for
+    visualisation and spectral analysis (FFT/PSD) for noise characterisation.
+  </description>
+  <maintainer email="23f3000074@es.study.iitm.ac.in">bishu</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-websockets</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>python3-numpy</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

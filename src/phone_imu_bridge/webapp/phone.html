@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>IMU Sensor — Phone Transmitter</title>
+    <meta name="description" content="Phone sensor reader that streams accelerometer and gyroscope data to the ROS 2 IMU navigation backend.">
+    <link rel="manifest" href="manifest.json">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* Phone-specific overrides */
+        body {
+            min-height: 100vh;
+            min-height: 100dvh;
+        }
+        .phone-container {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+        .sensor-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            margin: 1rem 0;
+        }
+        .sensor-cell {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.75rem;
+            text-align: center;
+        }
+        .sensor-cell .label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.25rem;
+        }
+        .sensor-cell .value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: var(--text);
+        }
+        .sensor-cell.accel .value { color: var(--accent-blue); }
+        .sensor-cell.gyro .value { color: var(--accent-purple); }
+        .big-button {
+            width: 100%;
+            padding: 1rem;
+            border-radius: 16px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.3s ease;
+            margin-bottom: 0.75rem;
+        }
+        .big-button.start {
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-teal));
+            color: #fff;
+        }
+        .big-button.stop {
+            background: linear-gradient(135deg, var(--accent-red), var(--accent-orange));
+            color: #fff;
+        }
+        .big-button:active {
+            transform: scale(0.97);
+        }
+        .config-section {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+        .config-section h3 {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+        }
+        .stream-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        .stream-indicator.idle {
+            background: rgba(255,255,255,0.05);
+            color: var(--text-muted);
+        }
+        .stream-indicator.streaming {
+            background: rgba(52, 211, 153, 0.15);
+            color: var(--accent-green);
+            animation: pulse-bg 2s ease-in-out infinite;
+        }
+        @keyframes pulse-bg {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .sample-counter {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-align: center;
+            margin-top: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="phone-container">
+        <!-- Header -->
+        <header style="text-align:center; padding: 1.5rem 0 0.5rem;">
+            <div class="logo-icon" style="margin:0 auto 0.5rem; width:40px; height:40px;">
+                <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+                    <line x1="12" y1="18" x2="12" y2="18" stroke-linecap="round" stroke-width="3"/>
+                </svg>
+            </div>
+            <h1 style="font-size:1.3rem; margin:0;">IMU Sensor</h1>
+            <p class="subtitle" style="font-size:0.8rem;">Phone Transmitter</p>
+        </header>
+
+        <!-- Stream Status -->
+        <div class="stream-indicator idle" id="stream-indicator">
+            <span class="status-dot"></span>
+            <span id="stream-text">Ready to stream</span>
+        </div>
+
+        <!-- Controls -->
+        <button class="big-button start" id="btn-start">
+            ▶ Start Streaming
+        </button>
+        <button class="big-button stop" id="btn-stop" style="display:none">
+            ■ Stop Streaming
+        </button>
+
+        <!-- Live Sensor Values -->
+        <div class="sensor-grid">
+            <div class="sensor-cell accel">
+                <div class="label">Accel X</div>
+                <div class="value" id="s-ax">0.00</div>
+            </div>
+            <div class="sensor-cell accel">
+                <div class="label">Accel Y</div>
+                <div class="value" id="s-ay">0.00</div>
+            </div>
+            <div class="sensor-cell accel">
+                <div class="label">Accel Z</div>
+                <div class="value" id="s-az">0.00</div>
+            </div>
+            <div class="sensor-cell gyro">
+                <div class="label">Gyro X</div>
+                <div class="value" id="s-gx">0.00</div>
+            </div>
+            <div class="sensor-cell gyro">
+                <div class="label">Gyro Y</div>
+                <div class="value" id="s-gy">0.00</div>
+            </div>
+            <div class="sensor-cell gyro">
+                <div class="label">Gyro Z</div>
+                <div class="value" id="s-gz">0.00</div>
+            </div>
+        </div>
+
+        <div class="sample-counter">
+            Samples sent: <span id="sample-count">0</span> · 
+            Rate: <span id="send-rate">0</span> Hz
+        </div>
+
+        <!-- Configuration -->
+        <div class="config-section">
+            <h3>Server Configuration</h3>
+            <div class="form-group">
+                <label for="server-url">HTTP Endpoint</label>
+                <input type="text" id="server-url" value="" 
+                       placeholder="http://<pc-ip>:5555/data">
+            </div>
+            <div class="form-group">
+                <label for="send-interval">Send Interval (ms)</label>
+                <input type="number" id="send-interval" value="50" min="10" max="1000">
+            </div>
+        </div>
+
+        <!-- Permissions Notice -->
+        <div class="config-section" id="permission-notice">
+            <h3>⚠️ Sensor Access</h3>
+            <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.5;">
+                This page needs access to your phone's motion sensors.
+                <strong>Android Chrome</strong> grants sensor access automatically over HTTP on local networks.
+                <strong>iOS Safari</strong> requires HTTPS — tap Start to trigger the permission dialog.
+                If sensor values stay at 0.00, try opening this page in <strong>Chrome</strong>.
+            </p>
+        </div>
+
+        <footer style="text-align:center; padding:1rem; font-size:0.75rem; color:var(--text-muted);">
+            DSP Project · IIT Madras
+        </footer>
+    </div>
+
+    <script src="js/phone.js"></script>
+</body>
+</html>

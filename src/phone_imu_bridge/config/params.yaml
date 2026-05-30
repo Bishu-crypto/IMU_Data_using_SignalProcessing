@@ -1,0 +1,27 @@
+http_receiver_node:
+  ros__parameters:
+    http_port: 5555
+    frame_id: "phone_imu_link"
+
+madgwick_filter_node:
+  ros__parameters:
+    beta: 0.1                   # Higher beta for slow 1 Hz updates (faster convergence)
+    frequency: 1.0              # Sensor Logger free tier: 1 sample/sec
+
+spectral_analysis_node:
+  ros__parameters:
+    buffer_size: 64             # Smaller buffer for 1 Hz (fills in ~64s)
+    sample_rate: 1.0            # Match actual sample rate
+
+inertial_nav_node:
+  ros__parameters:
+    butterworth_cutoff: 0.3     # LPF cutoff (Hz) — must be < Nyquist = 0.5 Hz
+    zupt_threshold: 0.3         # ZUPT acceleration threshold (m/s²) — relaxed for 1 Hz
+    zupt_window: 3              # 3 consecutive samples = 3 seconds stationary
+    frequency: 1.0              # Match actual sample rate
+    gravity: 9.81               # Local gravitational acceleration (m/s²)
+
+ws_bridge_node:
+  ros__parameters:
+    ws_port: 8765               # WebSocket server port
+    broadcast_rate: 5.0         # Lower rate since data comes at 1 Hz

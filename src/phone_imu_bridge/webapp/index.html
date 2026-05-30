@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IMU Inertial Navigation — Dashboard</title>
+    <meta name="description" content="Real-time visualization dashboard for phone-based inertial navigation unit. Displays orientation, velocity, displacement, and FFT spectrum.">
+    <link rel="manifest" href="manifest.json">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- ── Header ────────────────────────────────────────────────── -->
+    <header id="main-header">
+        <div class="header-left">
+            <div class="logo-icon">
+                <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5"/>
+                    <path d="M2 12l10 5 10-5"/>
+                </svg>
+            </div>
+            <div>
+                <h1>IMU Navigator</h1>
+                <p class="subtitle">Inertial Navigation Unit — DSP Project</p>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="status-badge" id="connection-status">
+                <span class="status-dot"></span>
+                <span class="status-text">Disconnected</span>
+            </div>
+            <button id="btn-connect" class="btn btn-primary">Connect</button>
+            <button id="btn-settings" class="btn btn-ghost" title="Settings">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- ── Settings Modal ────────────────────────────────────────── -->
+    <div class="modal-overlay" id="settings-modal" style="display:none">
+        <div class="modal-card">
+            <h2>Connection Settings</h2>
+            <div class="form-group">
+                <label for="ws-host">WebSocket Host</label>
+                <input type="text" id="ws-host" value="localhost" placeholder="e.g. 192.168.1.100">
+            </div>
+            <div class="form-group">
+                <label for="ws-port">WebSocket Port</label>
+                <input type="number" id="ws-port" value="8765">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" id="btn-cancel-settings">Cancel</button>
+                <button class="btn btn-primary" id="btn-save-settings">Save & Connect</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Main Grid ─────────────────────────────────────────────── -->
+    <main id="dashboard-grid">
+
+        <!-- Card: 3D Orientation -->
+        <section class="card card-orientation" id="card-orientation">
+            <div class="card-header">
+                <h2>Orientation</h2>
+                <span class="card-badge">Madgwick AHRS</span>
+            </div>
+            <div class="card-body">
+                <canvas id="canvas-orientation" width="400" height="300"></canvas>
+                <div class="euler-readout">
+                    <div class="euler-item">
+                        <span class="euler-label">Roll</span>
+                        <span class="euler-value" id="val-roll">0.0°</span>
+                    </div>
+                    <div class="euler-item">
+                        <span class="euler-label">Pitch</span>
+                        <span class="euler-value" id="val-pitch">0.0°</span>
+                    </div>
+                    <div class="euler-item">
+                        <span class="euler-label">Yaw</span>
+                        <span class="euler-value" id="val-yaw">0.0°</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Card: Acceleration (Raw) -->
+        <section class="card card-accel" id="card-accel">
+            <div class="card-header">
+                <h2>Acceleration</h2>
+                <span class="card-badge">m/s²</span>
+            </div>
+            <div class="card-body">
+                <canvas id="canvas-accel" width="500" height="200"></canvas>
+            </div>
+        </section>
+
+        <!-- Card: Velocity -->
+        <section class="card card-velocity" id="card-velocity">
+            <div class="card-header">
+                <h2>Velocity</h2>
+                <span class="card-badge">m/s</span>
+            </div>
+            <div class="card-body">
+                <canvas id="canvas-velocity" width="500" height="200"></canvas>
+                <div class="metric-row">
+                    <div class="metric">
+                        <span class="metric-label">Vx</span>
+                        <span class="metric-value" id="val-vx">0.00</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Vy</span>
+                        <span class="metric-value" id="val-vy">0.00</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Vz</span>
+                        <span class="metric-value" id="val-vz">0.00</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Card: Displacement -->
+        <section class="card card-displacement" id="card-displacement">
+            <div class="card-header">
+                <h2>Displacement</h2>
+                <span class="card-badge">meters</span>
+            </div>
+            <div class="card-body">
+                <canvas id="canvas-displacement" width="500" height="200"></canvas>
+                <div class="metric-row">
+                    <div class="metric">
+                        <span class="metric-label">X</span>
+                        <span class="metric-value" id="val-px">0.00</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Y</span>
+                        <span class="metric-value" id="val-py">0.00</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Z</span>
+                        <span class="metric-value" id="val-pz">0.00</span>
+                    </div>
+                    <div class="metric metric-total">
+                        <span class="metric-label">Total</span>
+                        <span class="metric-value" id="val-ptotal">0.00</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Card: FFT Spectrum -->
+        <section class="card card-spectrum" id="card-spectrum">
+            <div class="card-header">
+                <h2>FFT Spectrum</h2>
+                <span class="card-badge">PSD (dB/Hz)</span>
+            </div>
+            <div class="card-body">
+                <canvas id="canvas-spectrum" width="500" height="220"></canvas>
+                <div class="metric-row">
+                    <div class="metric">
+                        <span class="metric-label">Noise Floor</span>
+                        <span class="metric-value" id="val-noise-floor">— dB</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Peak Freq</span>
+                        <span class="metric-value" id="val-peak-freq">— Hz</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">SNR</span>
+                        <span class="metric-value" id="val-snr">— dB</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Card: System Info -->
+        <section class="card card-info" id="card-info">
+            <div class="card-header">
+                <h2>System</h2>
+                <span class="card-badge">DSP Pipeline</span>
+            </div>
+            <div class="card-body">
+                <div class="pipeline-diagram">
+                    <div class="pipeline-step active" id="pipe-recv">
+                        <div class="pipe-icon">📡</div>
+                        <div class="pipe-label">HTTP Recv</div>
+                    </div>
+                    <div class="pipe-arrow">→</div>
+                    <div class="pipeline-step" id="pipe-madgwick">
+                        <div class="pipe-icon">🔄</div>
+                        <div class="pipe-label">Madgwick</div>
+                    </div>
+                    <div class="pipe-arrow">→</div>
+                    <div class="pipeline-step" id="pipe-filter">
+                        <div class="pipe-icon">📊</div>
+                        <div class="pipe-label">Butterworth</div>
+                    </div>
+                    <div class="pipe-arrow">→</div>
+                    <div class="pipeline-step" id="pipe-nav">
+                        <div class="pipe-icon">🧭</div>
+                        <div class="pipe-label">Navigation</div>
+                    </div>
+                </div>
+                <div class="info-stats">
+                    <div class="info-stat">
+                        <span class="info-label">Messages</span>
+                        <span class="info-value" id="val-msg-count">0</span>
+                    </div>
+                    <div class="info-stat">
+                        <span class="info-label">Rate</span>
+                        <span class="info-value" id="val-msg-rate">0 Hz</span>
+                    </div>
+                    <div class="info-stat">
+                        <span class="info-label">Uptime</span>
+                        <span class="info-value" id="val-uptime">0s</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ── Footer ────────────────────────────────────────────────── -->
+    <footer id="main-footer">
+        <p>Phone IMU Inertial Navigation — DSP Project · Vaibhav (23f3000074) · IIT Madras</p>
+    </footer>
+
+    <script src="js/orientation3d.js"></script>
+    <script src="js/plots.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
