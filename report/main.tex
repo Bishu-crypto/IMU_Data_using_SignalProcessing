@@ -1,0 +1,357 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+
+% ======================================================================
+\begin{document}
+
+% -- Title Page --------------------------------------------------------
+\begin{titlepage}
+\centering
+\vspace*{2cm}
+{\Huge\bfseries Phone-Based Inertial Navigation Unit\\[0.3cm]
+Using Digital Signal Processing\par}
+\vspace{1cm}
+{\Large A ROS\,2 Implementation with Butterworth Filtering,\\
+Madgwick Sensor Fusion, and Real-Time Web Dashboard\par}
+\vspace{2cm}
+{\large\textbf{Course:} Digital Signal Processing\par}
+\vspace{0.5cm}
+{\large\textbf{Submitted by:}\par}
+\vspace{0.3cm}
+{\Large Vaibhav (23f3000074)\par}
+\vspace{0.3cm}
+{\large BS Electronic Systems\par}
+{\large Indian Institute of Technology Madras\par}
+\vspace{1.5cm}
+{\large\textbf{Date:} May 2026\par}
+\vfill
+{\small Email: \texttt{23f3000074@ds.study.iitm.ac.in}\\
+Repository: \texttt{https://github.com/Bishu-crypto/phone-imu-bridge}}
+\end{titlepage}
+
+% -- Abstract ----------------------------------------------------------
+\begin{abstract}
+This project implements a real-time \textbf{Inertial Navigation Unit (INU)} that transforms a smartphone into an inertial measurement unit (IMU) using its built-in accelerometer and gyroscope. The system streams 6-axis IMU data via HTTP to a ROS\,2 processing pipeline that applies: (1)~\textbf{Madgwick gradient-descent sensor fusion} for orientation estimation, (2)~a \textbf{2nd-order Butterworth IIR low-pass filter} designed via the bilinear transform for noise suppression, (3)~quaternion-based \textbf{gravity removal}, (4)~\textbf{trapezoidal numerical integration} for velocity and displacement estimation, and (5)~\textbf{Zero-Velocity Updates (ZUPT)} for drift mitigation. A companion web dashboard provides real-time visualization of orientation, acceleration, navigation state, and FFT-based spectral analysis. All DSP algorithms are implemented from first principles without reliance on \texttt{scipy.signal}.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% ======================================================================
+\section{Introduction}
+
+\subsection{Motivation}
+Modern smartphones contain MEMS (Micro-Electro-Mechanical Systems) inertial sensors---accelerometers and gyroscopes---that rival dedicated low-cost IMU hardware. This project leverages these sensors to build a complete inertial navigation pipeline, demonstrating core DSP concepts including digital filter design, sensor fusion, spectral analysis, and numerical integration.
+
+\subsection{Objectives}
+\begin{enumerate}
+  \item Stream raw 6-axis IMU data from an Android phone to a Linux workstation via HTTP.
+  \item Apply Madgwick AHRS sensor fusion to estimate 3D orientation as a quaternion.
+  \item Design and implement a 2nd-order Butterworth IIR low-pass filter from first principles using the bilinear transform.
+  \item Remove gravitational acceleration using quaternion-derived rotation matrices.
+  \item Estimate velocity and displacement via trapezoidal integration with ZUPT drift correction.
+  \item Perform real-time FFT-based spectral analysis for noise characterization.
+  \item Visualize all outputs on a real-time web dashboard.
+\end{enumerate}
+
+\subsection{Technology Stack}
+\begin{itemize}
+  \item \textbf{Platform:} Ubuntu 22.04, ROS\,2 Humble
+  \item \textbf{Language:} Python 3.10, JavaScript (ES6)
+  \item \textbf{Libraries:} NumPy, \texttt{websockets}
+  \item \textbf{Phone App:} Android Sensor Logger with HTTP Push
+  \item \textbf{Dashboard:} HTML5 Canvas, WebSocket client
+\end{itemize}
+
+% ======================================================================
+\section{System Architecture}
+
+The system follows a modular, publish-subscribe architecture built on ROS\,2. Five independent nodes form a DSP processing pipeline:
+
+\begin{verbatim}
+  +----------+       +---------+       +-----------+       +----------+
+  |   HTTP   | raw   |Madgwick | fused | Inertial  | vel/  | WebSocket|
+  | Receiver |------>| Filter  |------>|Navigation |------>|  Bridge  |
+  | (phone)  |       | (AHRS)  |       |(LPF+ZUPT) | pos   |(dashboard)
+  +----------+       +---------+       +-----------+       +----------+
+       |                                                        ^
+       |              +-----------+                             |
+       +------------->| Spectral  |-----------------------------+
+                      | Analysis  |  PSD (JSON)
+                      +-----------+
+\end{verbatim}
+
+\bigskip
+\noindent\textbf{ROS\,2 Topics:}
+\begin{center}
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Topic} & \textbf{Type} & \textbf{Description} \\
+\hline
+\texttt{/phone/imu/data\_raw}   & \texttt{sensor\_msgs/Imu}    & Raw 6-axis IMU \\
+\hline
+\texttt{/phone/imu/data\_fused} & \texttt{sensor\_msgs/Imu}    & Fused orientation \\
+\hline
+\texttt{/phone/nav/velocity}    & \texttt{Vector3Stamped}      & Estimated velocity \\
+\hline
+\texttt{/phone/nav/position}    & \texttt{Vector3Stamped}      & Estimated displacement \\
+\hline
+\texttt{/phone/imu/psd}         & \texttt{std\_msgs/String}    & PSD as JSON \\
+\hline
+\end{tabular}
+\end{center}
+
+% ======================================================================
+\section{DSP Theory and Implementation}
+
+\subsection{Butterworth Low-Pass Filter}
+
+\subsubsection{Why Butterworth?}
+The Butterworth filter provides a \textbf{maximally flat magnitude response} in the passband---no ripple---making it ideal for IMU data where smooth attenuation of high-frequency MEMS noise is needed without passband distortion.
+
+\subsubsection{Analog Prototype}
+The 2nd-order Butterworth analog transfer function is:
+\begin{equation}
+H_a(s) = \frac{\omega_c^2}{s^2 + \sqrt{2}\,\omega_c\,s + \omega_c^2}
+\end{equation}
+This yields a $-40$\,dB/decade rolloff beyond $\omega_c$.
+
+\subsubsection{Bilinear Transform}
+To convert from continuous-time to discrete-time:
+\begin{equation}
+s = \frac{2}{T}\cdot\frac{z-1}{z+1}
+\end{equation}
+where $T = 1/f_s$ is the sampling period.
+
+\subsubsection{Frequency Pre-Warping}
+The bilinear transform introduces frequency warping. To place the $-3$\,dB point at exactly $f_c$:
+\begin{equation}
+\omega_c' = \frac{2}{T}\tan\!\left(\frac{\pi f_c}{f_s}\right)
+\end{equation}
+
+\subsubsection{Discrete Transfer Function}
+With $K = 2f_s$:
+\begin{align}
+D &= K^2 + \sqrt{2}\,\omega_c'\,K + {\omega_c'}^2 \\
+b_0 &= {\omega_c'}^2 / D,\quad b_1 = 2\,{\omega_c'}^2 / D,\quad b_2 = {\omega_c'}^2 / D \\
+a_1 &= (2\,{\omega_c'}^2 - 2K^2) / D,\quad a_2 = (K^2 - \sqrt{2}\,\omega_c'\,K + {\omega_c'}^2) / D
+\end{align}
+
+\subsubsection{Difference Equation (Direct Form I)}
+\begin{equation}
+y[n] = b_0\,x[n] + b_1\,x[n\!-\!1] + b_2\,x[n\!-\!2] - a_1\,y[n\!-\!1] - a_2\,y[n\!-\!2]
+\end{equation}
+With $f_c = 5$\,Hz and $f_s = 100$\,Hz, this removes sensor noise while preserving human-scale motion.
+
+\subsubsection{IIR vs FIR Trade-off}
+IIR was chosen over FIR because: (1)~lower order means fewer coefficients and less delay, (2)~non-linear phase is acceptable for IMU navigation where exact phase alignment is not critical.
+
+\subsubsection{Implementation (dsp\_filters.py)}
+\begin{verbatim}
+def _design(self):
+    fs, fc = self.sample_rate, self.cutoff_hz
+    wc = 2.0 * fs * math.tan(math.pi * fc / fs)  # Pre-warp
+    k  = 2.0 * fs
+    k2, wc2 = k * k, wc * wc
+    sqrt2_wc_k = math.sqrt(2.0) * wc * k
+    denom = k2 + sqrt2_wc_k + wc2
+    b0 = wc2 / denom;  b1 = 2.0 * wc2 / denom;  b2 = b0
+    a1 = (2.0*wc2 - 2.0*k2) / denom
+    a2 = (k2 - sqrt2_wc_k + wc2) / denom
+    return (b0, b1, b2), (1.0, a1, a2)
+\end{verbatim}
+
+% ----------------------------------------------------------------------
+\subsection{Madgwick AHRS Sensor Fusion}
+
+\subsubsection{Problem Statement}
+Given noisy accelerometer ($\mathbf{a}$) and gyroscope ($\boldsymbol{\omega}$) readings, estimate device orientation as a unit quaternion $\mathbf{q} = [w, x, y, z]^T$.
+
+\subsubsection{Algorithm}
+The Madgwick filter uses \textbf{gradient descent} to correct gyroscope-integrated orientation toward the gravity reference:
+\begin{equation}
+\mathbf{q}_{t+1} = \mathbf{q}_t + \dot{\mathbf{q}}\,\Delta t, \qquad
+\dot{\mathbf{q}} = \tfrac{1}{2}\mathbf{q}_t \otimes \boldsymbol{\omega} - \beta\,\frac{\nabla f}{\|\nabla f\|}
+\end{equation}
+
+\subsubsection{Objective Function}
+\begin{align}
+f_1 &= 2(q_1 q_3 - q_0 q_2) - a_x \\
+f_2 &= 2(q_0 q_1 + q_2 q_3) - a_y \\
+f_3 &= 2(0.5 - q_1^2 - q_2^2) - a_z
+\end{align}
+The Jacobian $\mathbf{J}$ is computed analytically; gradient is $\nabla f = \mathbf{J}^T \mathbf{f}$.
+
+\subsubsection{Gain Parameter $\beta$}
+$\beta = 0.033$ balances gyroscope trust (low $\beta$: fast response) vs.\ accelerometer trust (high $\beta$: drift-free but noisy).
+
+\subsubsection{Startup Calibration}
+First 50 samples are averaged to compute an initial quaternion from the gravity vector via pitch/roll decomposition.
+
+% ----------------------------------------------------------------------
+\subsection{Gravity Removal}
+
+The accelerometer measures \textbf{specific force}:
+\begin{equation}
+\mathbf{a}_{\text{meas}} = \mathbf{a}_{\text{linear}} + \mathbf{R}^T \mathbf{g}
+\end{equation}
+We remove gravity using the quaternion-derived rotation matrix:
+\begin{align}
+\mathbf{a}_{\text{linear,body}} &= \mathbf{a}_{\text{meas}} - \mathbf{R}^T \mathbf{g} \\
+\mathbf{a}_{\text{linear,world}} &= \mathbf{R}\,\mathbf{a}_{\text{linear,body}}
+\end{align}
+
+The quaternion-to-rotation-matrix:
+\begin{equation}
+\mathbf{R} = \begin{bmatrix}
+1-2(y^2+z^2) & 2(xy-wz) & 2(xz+wy) \\
+2(xy+wz) & 1-2(x^2+z^2) & 2(yz-wx) \\
+2(xz-wy) & 2(yz+wx) & 1-2(x^2+y^2)
+\end{bmatrix}
+\end{equation}
+
+% ----------------------------------------------------------------------
+\subsection{Trapezoidal Numerical Integration}
+
+Trapezoidal rule (more accurate than forward Euler):
+\begin{align}
+\mathbf{v}[n] &= \mathbf{v}[n\!-\!1] + \frac{\Delta t}{2}\bigl(\mathbf{a}[n] + \mathbf{a}[n\!-\!1]\bigr) \\
+\mathbf{p}[n] &= \mathbf{p}[n\!-\!1] + \frac{\Delta t}{2}\bigl(\mathbf{v}[n] + \mathbf{v}[n\!-\!1]\bigr)
+\end{align}
+$\mathcal{O}(\Delta t^3)$ local error vs.\ $\mathcal{O}(\Delta t^2)$ for Euler, at 100\,Hz ($\Delta t = 10$\,ms).
+
+% ----------------------------------------------------------------------
+\subsection{Zero-Velocity Update (ZUPT)}
+
+Bounds unbounded drift from double integration:
+$$\text{If } \|\mathbf{a}_{\text{filtered}}\| < 0.15\text{ m/s}^2 \text{ for 10 consecutive samples} \implies \mathbf{v} \leftarrow \mathbf{0}$$
+Filter states are also reset to prevent residual bias accumulation.
+
+% ----------------------------------------------------------------------
+\subsection{Spectral Analysis (FFT/PSD)}
+
+\textbf{Hann window} reduces spectral leakage:
+$w[n] = 0.5\bigl(1 - \cos(2\pi n/(N-1))\bigr)$, achieving $-31$\,dB sidelobes.
+
+\textbf{PSD} via periodogram:
+\begin{equation}
+\text{PSD}[k] = \frac{|X[k]|^2}{f_s \cdot \sum w^2[n]}, \qquad
+\text{PSD}_{\text{dB}} = 10\log_{10}(\text{PSD})
+\end{equation}
+
+Metrics: noise floor (median PSD), peak frequency, SNR (peak $-$ floor), confidence (peak/mean).
+
+% ======================================================================
+\section{Software Implementation}
+
+\subsection{Node Summary}
+
+\begin{center}
+\begin{tabular}{|l|l|p{5.5cm}|}
+\hline
+\textbf{Node} & \textbf{Executable} & \textbf{Function} \\
+\hline
+HTTPReceiverNode     & http\_receiver     & HTTP server (port 5555) for phone JSON data \\
+\hline
+MadgwickFilterNode   & madgwick\_filter   & AHRS fusion ($\beta\!=\!0.033$, 100\,Hz) \\
+\hline
+SpectralAnalysisNode & spectral\_analysis & 256-pt Hann-windowed FFT/PSD \\
+\hline
+InertialNavNode      & inertial\_nav      & Gravity removal, LPF, integration, ZUPT \\
+\hline
+WSBridgeNode         & ws\_bridge         & WebSocket server (port 8765) \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Web Dashboard}
+Connects via WebSocket and displays: 3D orientation (Canvas + Euler angles), acceleration time-series, velocity/displacement plots, FFT spectrum with noise floor/SNR metrics, and pipeline status indicators.
+
+% ======================================================================
+\section{Testing}
+
+Comprehensive \texttt{pytest} suite runs without ROS\,2 via mock fixtures in \texttt{conftest.py}:
+
+\begin{center}
+\begin{tabular}{|l|p{7cm}|}
+\hline
+\textbf{Test File} & \textbf{Coverage} \\
+\hline
+test\_dsp\_filters.py      & Coefficient design, Nyquist check, DC passthrough, noise attenuation \\
+\hline
+test\_madgwick\_filter.py   & Calibration, quaternion normalization, stationary orientation \\
+\hline
+test\_inertial\_nav.py      & Gravity removal, trapezoidal integration, ZUPT \\
+\hline
+test\_spectral\_analysis.py & PSD, windowing, peak detection, SNR \\
+\hline
+test\_http\_receiver.py     & JSON parsing, CORS headers, error handling \\
+\hline
+\end{tabular}
+\end{center}
+
+% ======================================================================
+\section{Results and Discussion}
+
+\subsection{Filter Performance}
+Butterworth LPF ($f_c\!=\!5$\,Hz, $f_s\!=\!100$\,Hz): unity DC gain, $-3$\,dB at 5\,Hz, $-40$\,dB/dec rolloff. Effective MEMS noise suppression above 10\,Hz.
+
+\subsection{Orientation}
+Madgwick converges within 0.5\,s. Computationally lighter than Kalman with comparable 6-axis accuracy.
+
+\subsection{Navigation}
+Trapezoidal integration is smoother than Euler. ZUPT bounds drift during stationary periods. Long-term position drift is inherent without external aiding (GPS, visual odometry).
+
+\subsection{Limitations}
+(1)~Drift from double integration of biased sensors. (2)~No magnetometer: yaw drifts freely. (3)~HTTP latency: 1--10\,ms on Wi-Fi.
+
+% ======================================================================
+\section{Conclusion}
+
+This project demonstrates a complete real-time inertial navigation pipeline from DSP first principles: Butterworth IIR filtering via bilinear transform, Madgwick AHRS fusion, quaternion-based gravity removal, trapezoidal integration with ZUPT, and Hann-windowed FFT spectral analysis---all within a modular ROS\,2 architecture with live web visualization.
+
+% ======================================================================
+\section*{References}
+\begin{enumerate}
+  \item[{[1]}] A.\,V.\ Oppenheim and A.\,S.\ Willsky, \textit{Signals and Systems}, 2nd ed., Prentice Hall, 1997.
+  \item[{[2]}] S.\,O.\,H.\ Madgwick, ``An efficient orientation filter for inertial and inertial/magnetic sensor arrays,'' Univ.\ of Bristol, 2010.
+  \item[{[3]}] O.\,J.\ Woodman, ``An introduction to inertial navigation,'' Univ.\ of Cambridge, UCAM-CL-TR-696, 2007.
+  \item[{[4]}] G.\ Heinzel et al., ``Spectrum and spectral density estimation by the DFT,'' Max Planck Institute, 2002.
+  \item[{[5]}] ROS\,2 Humble Docs, \texttt{https://docs.ros.org/en/humble/}.
+\end{enumerate}
+
+% ======================================================================
+\appendix
+\section{How to Run}
+\begin{verbatim}
+cd ~/phone_imu_ws
+colcon build --symlink-install
+source install/setup.bash
+ros2 launch phone_imu_bridge imu_bridge.launch.py
+# Phone: HTTP Push URL = http://<PC-IP>:5555/data
+# Dashboard: open webapp/index.html in browser
+\end{verbatim}
+
+\section{Project File Structure}
+\begin{verbatim}
+phone_imu_bridge/
+  phone_imu_bridge/           # Python package
+    dsp_filters.py            # Butterworth LPF (first principles)
+    http_receiver_node.py     # HTTP server for phone data
+    madgwick_filter_node.py   # AHRS sensor fusion
+    inertial_nav_node.py      # Dead-reckoning navigation
+    spectral_analysis_node.py # FFT/PSD analysis
+    ws_bridge_node.py         # ROS-to-WebSocket bridge
+  webapp/                     # Web dashboard
+    index.html, phone.html
+    css/style.css
+    js/app.js, plots.js, orientation3d.js, phone.js
+  launch/imu_bridge.launch.py
+  config/params.yaml
+  test/conftest.py, test_*.py # pytest suite
+  package.xml, setup.py, README.md
+\end{verbatim}
+
+\end{document}
